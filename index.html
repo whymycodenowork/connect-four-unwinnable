@@ -1,165 +1,274 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8"><title>Connect 4</title>
-<style>
-  body {margin:0;background:#000;display:flex;flex-direction:column;align-items:center;color:white}
-  canvas {margin-top:10px}
-  button {margin-top:10px;padding:10px 20px;background:#444;color:white;border:none;border-radius:5px;cursor:pointer}
-  button:hover {background:#666}
-  .message {font-size:24px;margin-top:10px;color:#F00;}
-</style>
+  <meta charset="UTF-8">
+  <title>Connect Four</title>
+  <style>
+    body { margin: 0; background: black; color: white; font-family: sans-serif; text-align: center; }
+    canvas { display: block; margin: auto; background: #00f; cursor: pointer; }
+    #ui { margin-top: 10px; }
+    #status { font-size: 20px; margin: 10px 0; }
+    #spinner {
+      display: none;
+      margin-top: 20px;
+    }
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-top: 4px solid white;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .evaluation {
+      margin-top: 10px;
+      font-size: 18px;
+      display: none;
+    }
+  </style>
 </head>
 <body>
-<label>AI Depth: <input type="range" id="depth" min="1" max="6" value="4"></label>
-<canvas id="c" width="700" height="600"></canvas>
-<button id="restartBtn">Restart Game</button>
-<div class="message" id="gameMessage"></div>
-<script>
-const ROWS=6,COLS=7,SIZE=100,R=SIZE/2-5;
-const P1=1,P2=2,E=0,W=4;
-let board=[...Array(ROWS)].map(()=>Array(COLS).fill(E));
-let turn=P1,gameOver=0;
-const c=document.getElementById("c"),ctx=c.getContext("2d");
-const gameMessage = document.getElementById("gameMessage");
-const restartBtn = document.getElementById("restartBtn");
+  <div id="status">Player's Turn</div>
+  <canvas id="canvas" width="700" height="600"></canvas>
+  <div id="ui">
+    Mode:
+    <select id="mode">
+      <option value="pve">Player vs AI</option>
+      <option value="pvp">Player vs Player</option>
+    </select>
+    Difficulty: <input type="range" id="depth" min="1" max="6" value="4">
+    <span id="depthValue">4</span>
+    <button id="restartBtn">Restart</button>
+  </div>
 
-function draw(){
-  ctx.clearRect(0,0,c.width,c.height);
-  for(let r=0;r<ROWS;r++)for(let col=0;col<COLS;col++){
-    ctx.fillStyle="#00F";ctx.fillRect(col*SIZE,r*SIZE,SIZE,SIZE);
-    ctx.beginPath();
-    ctx.arc(col*SIZE+SIZE/2,r*SIZE+SIZE/2,R,0,2*Math.PI);
-    ctx.fillStyle=board[r][col]==P1?"#F00":board[r][col]==P2?"#FF0":"#000";
-    ctx.fill();
-  }
-}
+  <div id="spinner" class="spinner"></div>
+  <div id="evaluation" class="evaluation">Evaluating...</div>
 
-function copyBoard(b){ return JSON.parse(JSON.stringify(b)); }
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const COLS = 7, ROWS = 6, P1 = 1, P2 = 2, EMPTY = 0;
+      const canvas = document.getElementById("canvas"), ctx = canvas.getContext("2d");
+      const SQUARESIZE = canvas.width / COLS, RADIUS = SQUARESIZE / 2 - 5;
+      const status = document.getElementById("status"), depthSlider = document.getElementById("depth"), depthValue = document.getElementById("depthValue");
+      const modeSelect = document.getElementById("mode");
+      const restartBtn = document.getElementById("restartBtn");
+      const spinner = document.getElementById("spinner");
+      const evaluation = document.getElementById("evaluation");
 
-function validLoc(b,col){ return b[0][col]==E; }
+      let board, turn, gameOver = false, ghostCol = null, mode = "pve";
 
-function nextRow(b,col){
-  for(let r=ROWS-1;r>=0;r--)if(b[r][col]==E)return r;
-  return null;
-}
+      function restart() {
+        board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        turn = P1;
+        gameOver = false;
+        ghostCol = null;
+        mode = modeSelect.value;
+        updateStatus();
+        draw();
+      }
 
-function win(b,p){
-  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS-3;c++)
-    if([0,1,2,3].every(i=>b[r][c+i]==p))return true;
-  for(let c=0;c<COLS;c++)for(let r=0;r<ROWS-3;r++)
-    if([0,1,2,3].every(i=>b[r+i][c]==p))return true;
-  for(let r=0;r<ROWS-3;r++)for(let c=0;c<COLS-3;c++)
-    if([0,1,2,3].every(i=>b[r+i][c+i]==p))return true;
-  for(let r=3;r<ROWS;r++)for(let c=0;c<COLS-3;c++)
-    if([0,1,2,3].every(i=>b[r-i][c+i]==p))return true;
-  return false;
-}
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (let r = 0; r < ROWS; r++) {
+          for (let c = 0; c < COLS; c++) {
+            ctx.beginPath();
+            ctx.arc(c * SQUARESIZE + SQUARESIZE / 2, r * SQUARESIZE + SQUARESIZE / 2, RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = board[r][c] === P1 ? "red" : board[r][c] === P2 ? "yellow" : "black";
+            ctx.fill();
+          }
+        }
 
-function evalWin(w,p){
-  let s=0,o=p==P1?P2:P1;
-  let c=w.filter(x=>x==p).length;
-  let e=w.filter(x=>x==E).length;
-  if(c==4)s+=100;
-  else if(c==3&&e==1)s+=5;
-  else if(c==2&&e==2)s+=2;
-  if(w.filter(x=>x==o).length==3&&e==1)s-=4;
-  return s;
-}
-
-function scorePos(b,p){
-  let s=0;
-  let center=b.map(r=>r[Math.floor(COLS/2)]);
-  s+=center.filter(x=>x==p).length*3;
-  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS-3;c++)
-    s+=evalWin(b[r].slice(c,c+W),p);
-  for(let c=0;c<COLS;c++)for(let r=0;r<ROWS-3;r++)
-    s+=evalWin([0,1,2,3].map(i=>b[r+i][c]),p);
-  for(let r=0;r<ROWS-3;r++)for(let c=0;c<COLS-3;c++)
-    s+=evalWin([0,1,2,3].map(i=>b[r+i][c+i]),p);
-  for(let r=3;r<ROWS;r++)for(let c=0;c<COLS-3;c++)
-    s+=evalWin([0,1,2,3].map(i=>b[r-i][c+i]),p);
-  return s;
-}
-
-function validCols(b){ return [...Array(COLS).keys()].filter(c=>validLoc(b,c)); }
-
-function term(b){ return win(b,P1)||win(b,P2)||validCols(b).length==0; }
-
-function minimax(b,d,a,beta,maxim){
-  let valCols=validCols(b);
-  let t=term(b);
-  if(d==0||t){
-    if(t){
-      if(win(b,P2))return [null,1e9];
-      else if(win(b,P1))return [null,-1e9];
-      else return [null,0];
-    }
-    return [null,scorePos(b,P2)];
-  }
-  if(maxim){
-    let v=-1e9,col=valCols[Math.floor(Math.random()*valCols.length)];
-    for(let c of valCols){
-      let r=nextRow(b,c),b2=copyBoard(b);
-      b2[r][c]=P2;
-      let s=minimax(b2,d-1,a,beta,false)[1];
-      if(s>v){v=s;col=c;}
-      a=Math.max(a,v);
-      if(a>=beta)break;
-    }
-    return [col,v];
-  }else{
-    let v=1e9,col=valCols[Math.floor(Math.random()*valCols.length)];
-    for(let c of valCols){
-      let r=nextRow(b,c),b2=copyBoard(b);
-      b2[r][c]=P1;
-      let s=minimax(b2,d-1,a,beta,true)[1];
-      if(s<v){v=s;col=c;}
-      beta=Math.min(beta,v);
-      if(a>=beta)break;
-    }
-    return [col,v];
-  }
-}
-
-c.onclick=e=>{
-  if(gameOver)return;
-  let x=Math.floor(e.offsetX/SIZE);
-  if(validLoc(board,x)){
-    let r=nextRow(board,x);
-    board[r][x]=P1;
-    if(win(board,P1)){
-      gameMessage.textContent = "You win!";
-      gameOver=1;
-    }
-    else{
-      let depth=+document.getElementById("depth").value;
-      let [aiCol]=minimax(board,depth,-1e9,1e9,true);
-      if(validLoc(board,aiCol)){
-        let r2=nextRow(board,aiCol);
-        board[r2][aiCol]=P2;
-        if(win(board,P2)){
-          gameMessage.textContent = "AI wins!";
-          gameOver=1;
+        if (ghostCol !== null && !gameOver) {
+          const row = getRow(ghostCol);
+          if (row !== null) {
+            ctx.beginPath();
+            ctx.arc(ghostCol * SQUARESIZE + SQUARESIZE / 2, row * SQUARESIZE + SQUARESIZE / 2, RADIUS, 0, 2 * Math.PI);
+            ctx.fillStyle = turn === P1 ? "rgba(255, 0, 0, 0.3)" : "rgba(255, 255, 0, 0.3)";
+            ctx.fill();
+          }
         }
       }
-    }
-    if(validCols(board).length==0&&!gameOver){
-      gameMessage.textContent = "Draw!";
-      gameOver=1;
-    }
-    draw();
-  }
-};
 
-restartBtn.onclick = () => {
-  board = [...Array(ROWS)].map(() => Array(COLS).fill(E));
-  gameOver = 0;
-  gameMessage.textContent = "";
-  draw();
-};
+      function updateStatus(text) {
+        if (text) status.textContent = text;
+        else if (mode === "pvp") status.textContent = `Player ${turn}'s Turn`;
+        else status.textContent = turn === P1 ? "Player's Turn" : "AI's Turn";
+      }
 
-draw();
-</script>
+      function getValidCols() {
+        return board[0].map((_, c) => board[0][c] === EMPTY ? c : null).filter(c => c !== null);
+      }
+
+      function getRow(col, b = board) {
+        for (let r = ROWS - 1; r >= 0; r--) if (b[r][col] === EMPTY) return r;
+        return null;
+      }
+
+      function drop(col, piece, b = board) {
+        const row = getRow(col, b);
+        if (row !== null) b[row][col] = piece;
+        return row;
+      }
+
+      function win(p, b = board) {
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            if ([0, 1, 2, 3].every(i => b[r][c + i] === p)) return true;
+        for (let c = 0; c < COLS; c++)
+          for (let r = 0; r < ROWS - 3; r++)
+            if ([0, 1, 2, 3].every(i => b[r + i][c] === p)) return true;
+        for (let r = 0; r < ROWS - 3; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            if ([0, 1, 2, 3].every(i => b[r + i][c + i] === p)) return true;
+        for (let r = 3; r < ROWS; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            if ([0, 1, 2, 3].every(i => b[r - i][c + i] === p)) return true;
+        return false;
+      }
+
+      function scoreWindow(w, p) {
+        let score = 0, opp = p === P2 ? P1 : P2;
+        const count = x => w.filter(i => i === x).length;
+        if (count(p) === 4) score += 100;
+        else if (count(p) === 3 && count(0) === 1) score += 50;
+        else if (count(p) === 2 && count(0) === 2) score += 10;
+        if (count(opp) === 3 && count(0) === 1) score -= 80;
+        return score;
+      }
+
+      function evaluate(b, p) {
+        let score = 0;
+        const center = b.map(r => r[Math.floor(COLS / 2)]);
+        score += center.filter(x => x === p).length * 6;
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            score += scoreWindow(b[r].slice(c, c + 4), p);
+        for (let c = 0; c < COLS; c++)
+          for (let r = 0; r < ROWS - 3; r++)
+            score += scoreWindow([0, 1, 2, 3].map(i => b[r + i][c]), p);
+        for (let r = 0; r < ROWS - 3; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            score += scoreWindow([0, 1, 2, 3].map(i => b[r + i][c + i]), p);
+        for (let r = 3; r < ROWS; r++)
+          for (let c = 0; c < COLS - 3; c++)
+            score += scoreWindow([0, 1, 2, 3].map(i => b[r - i][c + i]), p);
+        return score;
+      }
+
+      function terminal(b) {
+        return win(P1, b) || win(P2, b) || getValidCols().length === 0;
+      }
+
+      function clone(b) {
+        return b.map(r => r.slice());
+      }
+
+      function minimax(b, d, a, beta, maxPlayer) {
+        const valid = getValidCols();
+        const term = terminal(b);
+        if (d === 0 || term) {
+          if (term) {
+            if (win(P2, b)) return [null, 100000000];
+            if (win(P1, b)) return [null, -100000000];
+            return [null, 0];
+          }
+          return [null, evaluate(b, P2)];
+        }
+        let value = maxPlayer ? -Infinity : Infinity, bestCol = valid[0];
+        for (let col of valid) {
+          let row = getRow(col, b);
+          if (row === null) continue;
+          let copy = clone(b);
+          copy[row][col] = maxPlayer ? P2 : P1;
+          let score = minimax(copy, d - 1, a, beta, !maxPlayer)[1];
+          if (maxPlayer) {
+            if (score > value) [value, bestCol] = [score, col];
+            a = Math.max(a, value);
+          } else {
+            if (score < value) [value, bestCol] = [score, col];
+            beta = Math.min(beta, value);
+          }
+          if (a >= beta) break;
+        }
+        return [bestCol, value];
+      }
+
+      canvas.addEventListener("mousemove", e => {
+        if (gameOver || (mode === "pve" && turn !== P1)) return;
+        const rect = canvas.getBoundingClientRect();
+        ghostCol = Math.floor((e.clientX - rect.left) / SQUARESIZE);
+        draw();
+      });
+
+      canvas.addEventListener("mouseleave", () => {
+        ghostCol = null;
+        draw();
+      });
+
+      canvas.addEventListener("click", e => {
+        if (gameOver || (mode === "pve" && turn !== P1)) return;
+        const col = Math.floor(e.offsetX / SQUARESIZE);
+        const row = getRow(col);
+        if (row === null) return;
+
+        drop(col, turn);
+        draw();
+
+        if (win(turn)) {
+          updateStatus(`Player ${mode === "pvp" ? turn : ""} Wins!`);
+          gameOver = true;
+          return;
+        }
+        if (getValidCols().length === 0) {
+          updateStatus("Draw!");
+          gameOver = true;
+          return;
+        }
+
+        if (mode === "pvp") {
+          turn = turn === P1 ? P2 : P1;
+          updateStatus();
+          draw();
+        } else {
+          turn = null;
+          updateStatus();
+          spinner.style.display = "block";
+          evaluation.style.display = "block";
+          setTimeout(() => {
+            const [aiCol] = minimax(clone(board), +depthSlider.value, -Infinity, Infinity, true);
+            drop(aiCol, P2);
+            draw();
+            spinner.style.display = "none";
+            evaluation.style.display = "none";
+            if (win(P2)) {
+              updateStatus("AI Wins!");
+              gameOver = true;
+            } else if (getValidCols().length === 0) {
+              updateStatus("Draw!");
+              gameOver = true;
+            } else {
+              turn = P1;
+              updateStatus();
+              draw();
+            }
+          }, 1000); // Simulating AI thinking delay
+        }
+      });
+
+      depthSlider.addEventListener("input", () => {
+        depthValue.textContent = depthSlider.value;
+      });
+
+      modeSelect.addEventListener("change", restart);
+      restartBtn.addEventListener("click", restart);
+
+      restart();
+    });
+  </script>
 </body>
 </html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Connect Four</title>
+  <style>
+    canvas { background: black; display: block; margin: 0 auto; }
+    body { text-align: center; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+<canvas id="game" width="700" height="700"></canvas>
+<script>
+const ROWS = 6, COLS = 7, SIZE = 100;
+const PLAYER = 1, AI = 2, EMPTY = 0, R = SIZE / 2 - 5;
+const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
+let board = Array.from({length: ROWS}, () => Array(COLS).fill(EMPTY));
+let gameOver = false;
+
+function drawBoard() {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.fillStyle = 'blue';
+      ctx.fillRect(c*SIZE, (r+1)*SIZE, SIZE, SIZE);
+      ctx.beginPath();
+      ctx.arc(c*SIZE+SIZE/2, (r+1)*SIZE+SIZE/2, R, 0, 2*Math.PI);
+      ctx.fillStyle = board[r][c] === PLAYER ? 'red' : board[r][c] === AI ? 'yellow' : 'black';
+      ctx.fill();
+    }
+  }
+}
+
+function getOpenRow(col) {
+  for (let r = ROWS-1; r >= 0; r--) if (board[r][col] === EMPTY) return r;
+  return null;
+}
+
+function validCols() {
+  return [...Array(COLS).keys()].filter(c => board[0][c] === EMPTY);
+}
+
+function drop(col, piece) {
+  const row = getOpenRow(col);
+  if (row !== null) board[row][col] = piece;
+  return row;
+}
+
+function win(piece) {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS-3; c++)
+    if ([0,1,2,3].every(i => board[r][c+i] === piece)) return true;
+  for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS-3; r++)
+    if ([0,1,2,3].every(i => board[r+i][c] === piece)) return true;
+  for (let r = 0; r < ROWS-3; r++) for (let c = 0; c < COLS-3; c++)
+    if ([0,1,2,3].every(i => board[r+i][c+i] === piece)) return true;
+  for (let r = 3; r < ROWS; r++) for (let c = 0; c < COLS-3; c++)
+    if ([0,1,2,3].every(i => board[r-i][c+i] === piece)) return true;
+  return false;
+}
+
+function scorePosition(b, piece) {
+  let score = 0;
+  const center = b.map(r => r[Math.floor(COLS/2)]);
+  score += center.filter(p => p === piece).length * 3;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS-3; c++) {
+    const win = b[r].slice(c, c+4);
+    score += evalWindow(win, piece);
+  }
+  for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS-3; r++) {
+    const win = [0,1,2,3].map(i => b[r+i][c]);
+    score += evalWindow(win, piece);
+  }
+  for (let r = 0; r < ROWS-3; r++) for (let c = 0; c < COLS-3; c++) {
+    const win1 = [0,1,2,3].map(i => b[r+i][c+i]);
+    const win2 = [0,1,2,3].map(i => b[r+3-i][c+i]);
+    score += evalWindow(win1, piece) + evalWindow(win2, piece);
+  }
+  return score;
+}
+
+function evalWindow(w, piece) {
+  let score = 0, opp = piece === PLAYER ? AI : PLAYER;
+  let count = w.filter(p => p === piece).length;
+  let empty = w.filter(p => p === EMPTY).length;
+  if (count === 4) score += 100;
+  else if (count === 3 && empty === 1) score += 5;
+  else if (count === 2 && empty === 2) score += 2;
+  if (w.filter(p => p === opp).length === 3 && empty === 1) score -= 4;
+  return score;
+}
+
+function minimax(b, d, a, beta, max) {
+  const valid = validCols();
+  const term = win(PLAYER) || win(AI) || valid.length === 0;
+  if (d === 0 || term) {
+    if (win(AI)) return [null, Infinity];
+    if (win(PLAYER)) return [null, -Infinity];
+    return [null, scorePosition(b, AI)];
+  }
+  let best = [valid[0], max ? -Infinity : Infinity];
+  for (let col of valid) {
+    const row = getOpenRow(col);
+    let bCopy = b.map(r => r.slice());
+    bCopy[row][col] = max ? AI : PLAYER;
+    let [, score] = minimax(bCopy, d-1, a, beta, !max);
+    if (max && score > best[1]) best = [col, score], a = Math.max(a, score);
+    if (!max && score < best[1]) best = [col, score], beta = Math.min(beta, score);
+    if (a >= beta) break;
+  }
+  return best;
+}
+
+canvas.addEventListener('click', e => {
+  if (gameOver) return;
+  const col = Math.floor(e.offsetX / SIZE);
+  if (board[0][col] !== EMPTY) return;
+  const row = drop(col, PLAYER);
+  drawBoard();
+  if (win(PLAYER)) return end("PLAYER WINS!");
+
+  setTimeout(() => {
+    const [aiCol] = minimax(board, 5, -Infinity, Infinity, true);
+    if (aiCol != null && board[0][aiCol] === EMPTY) {
+      drop(aiCol, AI);
+      drawBoard();
+      if (win(AI)) return end("AI WINS!");
+      if (validCols().length === 0) return end("DRAW!");
+    }
+  }, 300);
+});
+
+function end(msg) {
+  gameOver = true;
+  setTimeout(() => alert(msg), 100);
+}
+
+drawBoard();
+</script>
+</body>
+</html>
